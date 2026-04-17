@@ -6,4 +6,4 @@ fastapi
 pydantic
 supabase
 uvicorn
-pinecone-client
+pinecone
