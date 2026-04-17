@@ -18,19 +18,24 @@ MAX_REPO_SIZE_KB = 50000  # 50MB limit
 MAX_FILE_SIZE_MB = 1
 REPOS_DIR = Path("./repos")
 
-HEADERS = {
-    "Accept": "application/vnd.github+json"
-    # Add GitHub token here if rate limited
-    # "Authorization": "Bearer YOUR_GITHUB_TOKEN"
-}
+def build_github_headers():
+    headers = {
+        "Accept": "application/vnd.github+json",
+    }
+    # Optional token avoids anonymous GitHub API rate limits on Render.
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+    return headers
 
 # =============================
 # 1️⃣ URL VALIDATION
 # =============================
 
 def validate_github_url(url: str):
-    pattern = r"https://github.com/([^/]+)/([^/]+)"
-    match = re.match(pattern, url)
+    cleaned_url = url.strip()
+    pattern = r"^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$"
+    match = re.match(pattern, cleaned_url)
 
     if not match:
         raise ValueError("Invalid GitHub URL")
@@ -45,10 +50,23 @@ def validate_github_url(url: str):
 
 def fetch_repo_metadata(owner, repo):
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
-    response = requests.get(api_url, headers=HEADERS)
+    response = requests.get(api_url, headers=build_github_headers())
+
+    if response.status_code == 404:
+        raise Exception("Repository not found or is private.")
+
+    if response.status_code == 403:
+        try:
+            payload = response.json()
+            message = payload.get("message", "")
+        except Exception:
+            message = ""
+        if "rate limit" in message.lower():
+            raise Exception("GitHub API rate limit exceeded. Add GITHUB_TOKEN in backend env and retry.")
+        raise Exception("GitHub API access forbidden. Check GitHub token permissions.")
 
     if response.status_code != 200:
-        raise Exception("Repository not found or is private.")
+        raise Exception(f"GitHub API request failed ({response.status_code}).")
 
     data = response.json()
 
