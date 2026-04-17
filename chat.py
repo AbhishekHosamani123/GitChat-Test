@@ -74,30 +74,19 @@ def retrieve_context(query: str, repo_id: str, top_k: int = 5) -> tuple[str, lis
     confidence = round((0.6 * top_score) + (0.4 * avg_score), 3)
         
     from supabase import create_client
-    import sqlite3
     try:
-        conn = sqlite3.connect('repos.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        url = os.environ.get("SUPABASE_URL")
+        key = os.environ.get("SUPABASE_ANON_KEY")
+        supabase = create_client(url, key)
         
-        placeholders = ','.join(['?'] * len(chunk_ids))
-        query_sql = f"""
-            SELECT chunk_id, file_path, start_line, end_line, code, summary, symbol_name
-            FROM chunks
-            WHERE chunk_id IN ({placeholders}) AND repo_id = ?
-        """
-        
-        # Append repo_id to the end of the parameters
-        params = chunk_ids + [repo_id]
-        cursor.execute(query_sql, params)
-        rows = [dict(row) for row in cursor.fetchall()]
-        conn.close()
+        chunk_res = supabase.table("chunks").select("chunk_id, file_path, start_line, end_line, code, summary, symbol_name").in_("chunk_id", chunk_ids).eq("repo_id", repo_id).execute()
+        rows = chunk_res.data
     except Exception as e:
-        print(f"Failed to fetch chunk data from SQLite: {e}")
+        print(f"Failed to fetch chunk data from Supabase: {e}")
         return "", [], 0.0, [], []
     
     if not rows:
-        print(f"No chunk data found in SQLite for IDs: {chunk_ids}")
+        print(f"No chunk data found in Supabase for IDs: {chunk_ids}")
         return "", [], 0.0, [], []
         
     results = []
@@ -250,6 +239,62 @@ def chat_interface(repo_id: str):
                 
         except Exception as e:
             print(f"\n[Error generating response]: {e}")
+
+def generate_chat_answer(repo_id: str, query: str) -> tuple[str, list, float]:
+    """Generates an answer for a given query and repo, returning structured data for the API."""
+    
+    # Start a chat session (stateless for API currently)
+    try:
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    except Exception as e:
+        raise Exception(f"Error initializing Gemini: {e}")
+        
+    chat = client.chats.create(
+        model="gemini-2.5-flash",
+        config=genai.types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+        )
+    )
+    
+    context, top_results, confidence, retrieved_ids, boosted_scores = retrieve_context(query, repo_id)
+    
+    if not context or not top_results:
+        return "No relevant context found.", [], 0.0
+        
+    augmented_prompt = f"User Question: {query}\n\n{context}"
+    
+    try:
+        response = chat.send_message(augmented_prompt)
+        answer = response.text.strip()
+        
+        # Format sources
+        sources_list = []
+        for row in top_results:
+            sources_list.append({
+                "file": row['file_path'],
+                "start_line": row['start_line'],
+                "end_line": row['end_line']
+            })
+            
+        # Logging
+        from datetime import datetime
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "query": query,
+            "repo_id": repo_id,
+            "retrieved_chunk_ids": retrieved_ids,
+            "raw_scores": [res['sim'] for res in top_results],
+            "boosted_scores": boosted_scores,
+            "confidence": confidence,
+            "response_length": len(answer)
+        }
+        with open("logs.json", "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+            
+        return answer, sources_list, confidence
+        
+    except Exception as e:
+        raise Exception(f"Failed to generate answer: {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

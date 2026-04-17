@@ -1,7 +1,12 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 repos/
 repos.db
 logs.json
 testrepo/
 *.pyc
+Frontend/node_modules/
+Frontend/dist/
+.vercel/

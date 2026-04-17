@@ -14,7 +14,7 @@ load_dotenv()
 # CONFIG
 # =============================
 
-MAX_REPO_SIZE_KB = 5000  # 5MB limit
+MAX_REPO_SIZE_KB = 50000  # 50MB limit
 MAX_FILE_SIZE_MB = 1
 REPOS_DIR = Path("./repos")
 

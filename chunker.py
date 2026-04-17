@@ -146,11 +146,15 @@ def save_chunks_to_db(chunks):
     records = []
     for c in chunks:
         records.append({
-            "chunk_id": c['chunk_id'], # Keep uuid structure although this hash is currently a string we should maybe remap it
+            "chunk_id": c['chunk_id'],
             "repo_id": c['repo_id'],
             "file_path": c['file_path'],
-            "function_name": c.get('symbol_name', ''), # Map to function_name in DB
-            "chunk_text": c['code'], # Map to chunk_text in DB
+            "symbol_name": c.get('symbol_name', ''),  # Use exact column names based on the SQLite PRAGMA
+            "symbol_type": c.get('symbol_type', 'function'),
+            "start_line": c.get('start_line', 0),
+            "end_line": c.get('end_line', 0),
+            "language": c.get('language', 'python'),
+            "code": c['code'],
             "summary": c.get('summary', ''),
             "keywords": c.get('keywords', []),
             "code_hash": c['code_hash'],

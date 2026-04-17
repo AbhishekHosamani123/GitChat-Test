@@ -11,7 +11,7 @@ load_dotenv()
 EMBEDDING_MODEL = "models/gemini-embedding-001"
 # Set to 3072 for Gemini models
 PINECONE_DIMENSION = 3072
-BATCH_SIZE = 25
+BATCH_SIZE = 20
 
 def init_pinecone():
     """Initializes the Pinecone index, creating it if it doesn't exist."""
@@ -52,7 +52,7 @@ def fetch_pending_chunks(batch_size):
     
     try:
         response = supabase.table("chunks") \
-            .select("chunk_id, repo_id, chunk_text, file_path, function_name, embedding_status") \
+            .select("chunk_id, repo_id, code, file_path, symbol_name, code_hash, embedding_status") \
             .eq("embedding_status", "pending") \
             .limit(batch_size) \
             .execute()
@@ -94,22 +94,53 @@ def run_worker():
             
         print(f"Processing batch of {len(batch)} chunks...")
         
+        # Ensure Supabase client is available for duplicate checking
+        url = os.environ.get("SUPABASE_URL")
+        key = os.environ.get("SUPABASE_ANON_KEY")
+        supabase = create_client(url, key)
+        
+        # Collect context to find existing indexed chunks
+        batch_repos = list(set(row['repo_id'] for row in batch))
+        batch_hashes = list(set(row['code_hash'] for row in batch))
+        
+        existing_res = supabase.table("chunks") \
+            .select("repo_id, code_hash") \
+            .in_("repo_id", batch_repos) \
+            .in_("code_hash", batch_hashes) \
+            .eq("embedding_status", "indexed") \
+            .execute()
+            
+        indexed_repo_hashes = set(f"{r['repo_id']}_{r['code_hash']}" for r in existing_res.data) if existing_res.data else set()
+        
         # Prepare data for embedding
         texts_to_embed = []
         vectors_to_upsert = []
+        chunks_to_mark_indexed = []
+        
+        hashes_in_this_batch = set()
         
         for row in batch:
             chunk_id = row['chunk_id']
             repo_id = row['repo_id']
-            code = row['chunk_text']
+            code = row['code']
             file_path = row['file_path']
-            symbol_name = row['function_name']
+            symbol_name = row['symbol_name']
+            code_hash = row['code_hash']
+            
+            repo_hash_key = f"{repo_id}_{code_hash}"
+            chunks_to_mark_indexed.append(chunk_id)
+            
+            # If we've already embedded this code hash for this repo (either previously or in this batch), skip it
+            if repo_hash_key in indexed_repo_hashes or repo_hash_key in hashes_in_this_batch:
+                continue
+                
+            hashes_in_this_batch.add(repo_hash_key)
             
             # Reconstruct content logic
             context = f"File: {file_path}\n"
             if symbol_name:
-                context += f"Component: {symbol_name}\n"
-            context += f"Code:\n{code}"
+                context += f"Symbol: {symbol_name}\n"
+            context += f"\nCode:\n{code}\n"
             
             texts_to_embed.append(context)
             
@@ -120,52 +151,52 @@ def run_worker():
                 "metadata": {
                     "repo_id": repo_id,
                     "file_path": file_path,
-                    "function_name": symbol_name if symbol_name else ""
+                    "symbol_name": symbol_name if symbol_name else ""
                 },
                 "namespace": repo_id # Clean isolation
             })
             
-        # Call the Gemini API
-        embeddings = get_gemini_embeddings(texts_to_embed)
-        
-        if not embeddings or len(embeddings) != len(batch):
-            print("Failed to generate embeddings. Retrying in 30 seconds...")
-            time.sleep(30)
-            continue
+        # Call the Gemini API only if we have unique chunks to embed
+        if texts_to_embed:
+            embeddings = get_gemini_embeddings(texts_to_embed)
             
-        # Group vectors by namespace (repo_id) for upserting
-        namespaces = {}
-        for i, vec_dict in enumerate(vectors_to_upsert):
-            vec_dict["values"] = embeddings[i]
-            ns = vec_dict.pop("namespace") # Extract namespace
-            if ns not in namespaces:
-                namespaces[ns] = []
-            namespaces[ns].append(vec_dict)
-            
-        # Upsert to Pinecone per namespace
-        success = True
-        for ns, vectors in namespaces.items():
-            try:
-                pinecone_index.upsert(vectors=vectors, namespace=ns)
-            except Exception as e:
-                print(f"Failed to upsert namespace {ns} to Pinecone: {e}")
-                success = False
-                break
+            if not embeddings or len(embeddings) != len(texts_to_embed):
+                print("Failed to generate embeddings. Retrying in 30 seconds...")
+                time.sleep(30)
+                continue
                 
-        if not success:
-            print("Skipping database update due to Pinecone upsert failure.")
-            time.sleep(10)
-            continue
+            # Group vectors by namespace (repo_id) for upserting
+            namespaces = {}
+            for i, vec_dict in enumerate(vectors_to_upsert):
+                vec_dict["values"] = embeddings[i]
+                ns = vec_dict.pop("namespace") # Extract namespace
+                if ns not in namespaces:
+                    namespaces[ns] = []
+                namespaces[ns].append(vec_dict)
+                
+            # Upsert to Pinecone per namespace
+            success = True
+            for ns, vectors in namespaces.items():
+                try:
+                    pinecone_index.upsert(vectors=vectors, namespace=ns)
+                except Exception as e:
+                    print(f"Failed to upsert namespace {ns} to Pinecone: {e}")
+                    success = False
+                    break
+                    
+            if not success:
+                print("Skipping database update due to Pinecone upsert failure.")
+                time.sleep(10)
+                continue
             
-        # Mark chunks as indexed in local DB
-        chunk_ids_to_mark = [row['chunk_id'] for row in batch]
-        mark_chunks_as_indexed(chunk_ids_to_mark)
+        # Mark chunks as indexed in local DB (including duplicates that skipped embedding)
+        mark_chunks_as_indexed(chunks_to_mark_indexed)
         
-        print(f"Successfully embedded and indexed {len(batch)} chunks.")
+        print(f"Successfully processed {len(batch)} chunks. (Embedded {len(texts_to_embed)}, Skipped {len(batch) - len(texts_to_embed)} duplicates)")
         
         # Free tier rate limit protection
-        print("Sleeping for 40 seconds to respect rate limits...")
-        time.sleep(40)
+        print("Sleeping for 12 seconds to respect rate limits...")
+        time.sleep(12)
 
 if __name__ == "__main__":
     run_worker()

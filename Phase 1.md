@@ -167,16 +167,5 @@ Add keyword index (e.g., `"keywords": ["user", "database", "create", "insert"]`)
   - **Retrieval Logging:** Silently commits a JSON record of every query, including top `chunk_ids` and scores, to `logs.json` for observability/auto-evaluation. 
   - **FastAPI HTTP Web Server:** Re-architected scripts into callable services. Hosted them behind endpoints `POST /repos/ingest`, `GET /repos/{repo_id}/status`, and `POST /chat` using FastAPI (`main.py`) to transition exactly into Web Product grade. 
 
-### 6. Web Application UI & Repo Summary (Phase 4) - **[COMPLETED]**
-- **Date:** 2026-03-04
-- **Objective:** Build a Next.js front-end interface and integrate an automated repository summarization payload.
-- **Features Implemented:**
-  - **Automated Repo Summary:** Hooked Gemini 2.5 Flash into the Python ingestion pipeline queue to automatically analyze the `README.md` file. It mathematically calculates a concise technical summary and immediately saves it into the Supabase database.
-  - **Next.js React Frontend:** Scaffolded a fast React frontend using Tailwind CSS components mapped to three robust pages:
-    - **Initialization:** An input portal to post GitHub URLs out to the backend API (`page.tsx`).
-    - **Progress Screen:** Live Web Poller that visually tracks ingestion chunking speeds and transition states (`repos/[repo_id]/status/page.tsx`).
-    - **Chat Interface:** A highly styled chat interface highlighting the LLM conversational texts, displaying the exact source filename links, calculating a confidence progress bar, and broadcasting the Repo Summary context on the very top of the interface (`repos/[repo_id]/chat/page.tsx`).
-  - **Cross-Origin Configuration:** Integrated `fastapi.middleware.cors` natively into the Py backend to securely allow frontend localhost browser proxying.
-
 ---
 *This document will be updated continuously as we progress through the development steps.*

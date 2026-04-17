@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply bg-background text-white antialiased selection:bg-primary/30;
+  }
+
+  #root {
+    @apply min-h-screen;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-panel/70 backdrop-blur-xl border border-white/10 shadow-2xl;
+  }
+  
+  .glass-button {
+    @apply bg-white/5 hover:bg-white/10 active:bg-white/5 border border-white/10 backdrop-blur-md transition-all duration-200;
+  }
+  
+  .gradient-text {
+    @apply bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent;
+  }
+
+  .feature-chip {
+    @apply inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 backdrop-blur-md;
+  }
+}
+
+/* Custom Scrollbar for chat */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-white/20;
+}
